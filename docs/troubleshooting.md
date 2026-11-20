@@ -40,10 +40,33 @@
 
 ### 4. 결과 (Result)
 * Chrome 브라우저 화면에 `Welcome to nginx!` 기본 페이지가 정상 출력됨을 확인함.
-* 서버 측 `/var/log/nginx/access.log`에서도 외부 클라이언트(Chrome)로부터 들어온 `"GET / HTTP/1.1" 200` 응답 로그를 최종 확인함.
+* 서버 측 명령어 및 `/var/log/nginx/access.log`에서 외부 클라이언트(Chrome)로부터 들어온 `"GET / HTTP/1.1" 200` 응답 로그를 최종 확인함.
+
+```bash
+$ sudo systemctl status nginx --no-pager
+Active: active (running)
+
+$ sudo ss -tulpn | grep :80
+tcp   LISTEN 0   511   0.0.0.0:80   0.0.0.0:*   users:(("nginx",pid=1771,fd=5),...)
+tcp   LISTEN 0   511      [::]:80      [::]:*   users:(("nginx",pid=1771,fd=6),...)
+
+$ sudo tail -n 5 /var/log/nginx/access.log
+::1 - - [19/Nov/2026:12:47:23 +0000] "HEAD / HTTP/1.1" 200 0 "-" "curl/8.5.0"
+<MY_IP> - - [19/Nov/2026:12:50:45 +0000] "GET / HTTP/1.1" 200 409 "-" "Mozilla/5.0 ... Chrome/..."
+```
 
 ![Nginx 상태 및 접근 로그 검증](images/nginx_status_logs.png)
 
 ### 5. 재발 방지 (Prevention)
 * HTTP(80) 전용 테스트 환경에서는 브라우저별 자동 HTTPS 업그레이드 기능으로 인한 오진을 막기 위해, **1차 검증 시 `curl -v http://<퍼블릭IP>` 같은 CLI 도구로 프로토콜·응답 코드를 먼저 확인**한 뒤 브라우저 테스트를 진행함.
 * 실제 서비스 운영 시에는 도메인 연결 및 TLS 인증서(Let's Encrypt 등)를 적용해 HTTPS(443)를 기본 제공함.
+
+---
+
+## 부록: 외부 접속 장애 점검 우선순위 체크리스트
+외부 접속이 실패할 경우 추측으로 설정을 변경하지 않고 **네트워크 외곽 → 인스턴스 내부** 순서로 계층별 원인을 소거합니다.
+
+1. **라우팅 & IGW:** VPC에 IGW Attach 여부, Public Subnet과 `0.0.0.0/0 → IGW` Route Table의 명시적 연결 여부, NACL 차단 여부 확인
+2. **보안 그룹(SG):** EC2에 연결된 SG 인바운드에 `HTTP(80) - 0.0.0.0/0` 허용 규칙 존재 여부 확인
+3. **퍼블릭 IP / DNS / 프로토콜:** EC2 퍼블릭 IPv4 할당 여부 확인 및 `curl -v http://<퍼블릭IP>`로 브라우저 HTTPS 자동 전환 배제
+4. **서버 프로세스 / 포트 / 로그:** `systemctl status nginx` → `ss -tulpn | grep :80` → `curl -I http://localhost` → `/var/log/nginx/access.log`, `error.log` 순으로 확인
